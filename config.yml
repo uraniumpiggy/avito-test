@@ -1,0 +1,9 @@
+listen:
+  bind_ip: 127.0.0.1
+  port: 8080
+database:
+  username: ""
+  password: ""
+  host: ""
+  port: 3306
+  database: ""
