@@ -1,10 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	cashaccount "user-balance-service/internal/cash_account"
+	"user-balance-service/internal/cash_account/db"
 	"user-balance-service/internal/config"
+	"user-balance-service/pkg/client/mysql"
 	"user-balance-service/pkg/logging"
 
 	"github.com/julienschmidt/httprouter"
@@ -18,8 +21,32 @@ func main() {
 
 	cfg := config.GetConfig()
 
+	database, err := mysql.NewClient(
+		context.Background(),
+		cfg.Database.Host,
+		cfg.Database.Port,
+		cfg.Database.Username,
+		cfg.Database.Password,
+		cfg.Database.Database)
+	if err != nil {
+		panic(err)
+	}
+
+	storage := db.NewStorage(database, logger)
+
+	err = storage.TransferBetweenUsers(context.Background(), &cashaccount.MoneyTransferDetails{
+		FromId: 4,
+		ToId:   3,
+		Amount: 250,
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	service := cashaccount.NewService(storage, logger)
+
 	logger.Info("Register handler")
-	handler := cashaccount.NewHandler(logger)
+	handler := cashaccount.NewHandler(service, logger)
 
 	handler.Register(router)
 	start(router, cfg)

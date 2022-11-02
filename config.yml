@@ -2,8 +2,8 @@ listen:
   bind_ip: 127.0.0.1
   port: 8080
 database:
-  username: ""
-  password: ""
-  host: ""
+  username: user
+  password: secret
+  host: localhost
   port: 3306
-  database: ""
+  database: service-db
