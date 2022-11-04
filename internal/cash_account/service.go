@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"user-balance-service/internal/apperror"
 	"user-balance-service/pkg/logging"
 )
 
@@ -24,44 +25,44 @@ func (s *Service) GetAmount(ctx context.Context, data *UserID) (*UserAmount, err
 
 func (s *Service) TopUpMoney(ctx context.Context, data *UserAmount) error {
 	if data.Amount <= 0 {
-		return fmt.Errorf("Incorrect amount")
+		return apperror.ErrBadRequest
 	}
 	return s.storage.TopUpMoney(ctx, data)
 }
 
 func (s *Service) WithdrawMoney(ctx context.Context, data *UserAmount) error {
 	if data.Amount <= 0 {
-		return fmt.Errorf("Incorrect amount")
+		return apperror.ErrBadRequest
 	}
 	return s.storage.WithdrawMoney(ctx, data)
 }
 
 func (s *Service) Reserve(ctx context.Context, data *ReserveDetails) error {
 	if data.Amount <= 0 {
-		return fmt.Errorf("Incorrect amount")
+		return apperror.ErrBadRequest
 	}
 	if data.OrderId <= 0 || data.ServiceId <= 0 {
-		return fmt.Errorf("Incorrect data")
+		return apperror.ErrBadRequest
 	}
 	return s.storage.ReserveMoney(ctx, data)
 }
 
 func (s *Service) AcceptRevenue(ctx context.Context, data *ReserveDetails) error {
 	if data.Amount <= 0 {
-		return fmt.Errorf("Incorrect amount")
+		return apperror.ErrBadRequest
 	}
 	if data.OrderId <= 0 || data.ServiceId <= 0 {
-		return fmt.Errorf("Incorrect data")
+		return apperror.ErrBadRequest
 	}
 	return s.storage.AcceptRevenue(ctx, data)
 }
 
 func (s *Service) TransferBetweenUsers(ctx context.Context, data *MoneyTransferDetails) error {
 	if data.Amount <= 0 {
-		return fmt.Errorf("Incorrect amount")
+		return apperror.ErrBadRequest
 	}
 	if data.ToId <= 0 || data.FromId <= 0 || data.FromId == data.ToId {
-		return fmt.Errorf("Incorrect user ids")
+		return apperror.ErrBadRequest
 	}
 	return s.storage.TransferBetweenUsers(ctx, data)
 }
@@ -72,10 +73,10 @@ func (s *Service) GetUserReport(
 	sortBy, sortDirection string) ([]*UserReportRow, error) {
 	rowOffset := pageNum * pageSize
 	if sortBy != "dateTime" && sortBy != "amount" && sortBy != "" {
-		return nil, fmt.Errorf("Incorrect sorting parameters")
+		return nil, apperror.ErrBadRequest
 	}
 	if sortDirection != "asc" && sortDirection != "desc" && sortDirection != "" {
-		return nil, fmt.Errorf("Incorrect sorting direction")
+		return nil, apperror.ErrBadRequest
 	}
 	if sortBy == "dateTime" {
 		sortBy = "created_at"

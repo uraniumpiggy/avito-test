@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"user-balance-service/internal/apperror"
 	cashaccount "user-balance-service/internal/cash_account"
 	"user-balance-service/pkg/logging"
 )
@@ -14,8 +15,15 @@ type db struct {
 }
 
 func isUserExsists(d *db, id uint32) error {
-	row := d.QueryRow(`select count(id) from service_user where id = ?;`, id)
-	return row.Err()
+	var count int
+	err := d.QueryRow(`select count(id) from service_user where id = ?;`, id).Scan(&count)
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return apperror.ErrNotFound
+	}
+	return nil
 }
 
 func updateUserReport(tx *sql.Tx, user_id uint32, amount float32, description string) error {
@@ -40,7 +48,7 @@ func (d *db) execWithTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
 
 	if err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
-			return fmt.Errorf("tx err: %v, rb err: %v", err, rbErr)
+			return fmt.Errorf("Rollback error")
 		}
 		return err
 	}
@@ -53,7 +61,6 @@ func (d *db) TopUpMoney(ctx context.Context, data *cashaccount.UserAmount) error
 	if err != nil {
 		return err
 	}
-
 	var count int
 	row := d.QueryRow(`select count(id) from main_account where service_user_id = ?;`, data.ID)
 	if err = row.Scan(&count); err != nil {
@@ -62,12 +69,12 @@ func (d *db) TopUpMoney(ctx context.Context, data *cashaccount.UserAmount) error
 
 	err = d.execWithTx(ctx, func(tx *sql.Tx) error {
 
-		if count == 0 { // user not have main_account lets create it
+		if count == 0 {
 			_, err := tx.Exec(`insert into main_account (balance, service_user_id) values (?, ?);`, data.Amount, data.ID)
 			if err != nil {
 				return err
 			}
-		} else { // user have main_account we ned top up it
+		} else {
 			_, err := tx.Exec(`update main_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ID)
 			if err != nil {
 				return err
@@ -81,6 +88,11 @@ func (d *db) TopUpMoney(ctx context.Context, data *cashaccount.UserAmount) error
 
 		return nil
 	})
+	if err != nil {
+		d.logger.Errorf("Error %s in topup to user: %d amount: %f", err, data.ID, data.Amount)
+	} else {
+		d.logger.Infof("Topup from user: %d amount: %f", err, data.ID, data.Amount)
+	}
 	return err
 }
 
@@ -119,6 +131,11 @@ func (d *db) WithdrawMoney(ctx context.Context, data *cashaccount.UserAmount) er
 
 		return nil
 	})
+	if err != nil {
+		d.logger.Errorf("Error %s in withdraw from user: %d amount: %f", err, data.ID, data.Amount)
+	} else {
+		d.logger.Infof("Withdraw from user: %d amount: %f", err, data.ID, data.Amount)
+	}
 	return err
 }
 
@@ -211,6 +228,11 @@ func (d *db) TransferBetweenUsers(ctx context.Context, data *cashaccount.MoneyTr
 		}
 		return nil
 	})
+	if err != nil {
+		d.logger.Errorf("Error %s transaction from user: %d, to user: %d, amount: %f", err, data.FromId, data.ToId, data.Amount)
+	} else {
+		d.logger.Infof("Transaction from user: %d, to user: %d, amount: %f", data.FromId, data.ToId, data.Amount)
+	}
 	return err
 }
 
@@ -238,12 +260,12 @@ func (d *db) ReserveMoney(ctx context.Context, data *cashaccount.ReserveDetails)
 			return err
 		}
 
-		if count == 0 { // user not have reserve_account lets create it
+		if count == 0 {
 			_, err := tx.Exec(`insert into reserve_account (balance, service_user_id) values (?, ?);`, data.Amount, data.ID)
 			if err != nil {
 				return err
 			}
-		} else { // user have reserve_account we ned top up it
+		} else {
 			_, err := tx.Exec(`update reserve_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ID)
 			if err != nil {
 				return err
@@ -262,6 +284,11 @@ func (d *db) ReserveMoney(ctx context.Context, data *cashaccount.ReserveDetails)
 
 		return nil
 	})
+	if err != nil {
+		d.logger.Errorf("Error %s in reserve user: %d amount: %f", err, data.ID, data.Amount)
+	} else {
+		d.logger.Infof("Reserve user: %d amount: %f", err, data.ID, data.Amount)
+	}
 	return err
 }
 
@@ -306,6 +333,7 @@ func (d *db) AcceptRevenue(ctx context.Context, data *cashaccount.ReserveDetails
 	})
 
 	if err != nil {
+		d.logger.Errorf("Error with accept money: %s", err)
 		return d.execWithTx(ctx, func(tx *sql.Tx) error {
 			_, err := tx.Exec(`update main_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ID)
 			if err != nil {
@@ -330,27 +358,12 @@ func (d *db) AcceptRevenue(ctx context.Context, data *cashaccount.ReserveDetails
 			return nil
 		})
 	}
-
-	return err
-}
-
-func (d *db) CreateReport(ctx context.Context, timeStart, timeEnd string) ([]*cashaccount.BookkeepingReportRow, error) {
-	res := make([]*cashaccount.BookkeepingReportRow, 0)
-	rows, err := d.Query(`select service_id, sum(amount) as sum from bookkeeping where created_at >= ? and created_at < ? group by service_id;`, timeStart, timeEnd)
-	defer rows.Close()
 	if err != nil {
-		return nil, err
+		d.logger.Errorf("Error %s in accept user: %d, order: %d, service: %d, amount: %f", err, data.ID, data.OrderId, data.ServiceId, data.Amount)
+	} else {
+		d.logger.Infof("Accept user: %d, order: %d, service: %d, amount: %f", data.ID, data.OrderId, data.ServiceId, data.Amount)
 	}
-
-	for rows.Next() {
-		item := new(cashaccount.BookkeepingReportRow)
-		if err := rows.Scan(&item.ServiceId, &item.Amount); err != nil {
-			return nil, err
-		}
-		res = append(res, item)
-	}
-
-	return res, nil
+	return err
 }
 
 func (d *db) GetUserReport(ctx context.Context, uid, rowOffest, pageSize uint32, sortBy, sortDirection string) ([]*cashaccount.UserReportRow, error) {
@@ -381,12 +394,39 @@ func (d *db) GetUserReport(ctx context.Context, uid, rowOffest, pageSize uint32,
 	return res, nil
 }
 
-func (d *db) SaveReport(ctx context.Context, hash, path string) error {
-	_, err := d.Exec(`insert into bookkeeping_report (hash_string, path_to_file) values (?, ?);`)
+func (d *db) CreateReport(ctx context.Context, timeStart, timeEnd string) ([]*cashaccount.BookkeepingReportRow, error) {
+	res := make([]*cashaccount.BookkeepingReportRow, 0)
+	rows, err := d.Query(`select service_id, sum(amount) as sum from bookkeeping where created_at >= ? and created_at < ? group by service_id;`, timeStart, timeEnd)
+	defer rows.Close()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+
+	for rows.Next() {
+		item := new(cashaccount.BookkeepingReportRow)
+		if err := rows.Scan(&item.ServiceId, &item.Amount); err != nil {
+			return nil, err
+		}
+		res = append(res, item)
+	}
+	return res, nil
+}
+
+func (d *db) SaveReport(ctx context.Context, hash, path string) error {
+	err := d.execWithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`delete from bookkeeping_report;`)
+		_, err = tx.Exec(`insert into bookkeeping_report (hash_string, path_to_file) values (?, ?);`, hash, path)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		d.logger.Errorf("Saving bookkeeping report failed %s. Hash: %s, path: %s", err, hash, path)
+	} else {
+		d.logger.Info("Saved bookkeeping report. Hash: %s, path: %s", hash, path)
+	}
+	return err
 }
 
 func (d *db) GetReport(ctx context.Context, hash string) (string, error) {
@@ -394,6 +434,9 @@ func (d *db) GetReport(ctx context.Context, hash string) (string, error) {
 	r := d.QueryRow(`select path_to_file from bookkeeping_report where hash_string = ?`, hash)
 	if err := r.Scan(&path); err != nil {
 		return "", err
+	}
+	if path == "" {
+		return "", apperror.ErrNotFound
 	}
 	return path, nil
 }

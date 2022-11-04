@@ -28,6 +28,10 @@ type TextResponse struct {
 	Message string `json:"message"`
 }
 
+type ReportLinkResponse struct {
+	Link string `json:"link"`
+}
+
 type BookkeepingReportRow struct {
 	ServiceId uint32
 	Amount    float32

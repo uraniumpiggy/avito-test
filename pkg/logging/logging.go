@@ -52,21 +52,16 @@ func init() {
 		FullTimestamp: true,
 	}
 
-	// err := os.MkdirAll("logs", 644)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// file, err := os.OpenFile("logs/all.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 655) // chack
-	// if err != nil {
-	// 	panic(err)
-	// }
+	file, err := os.Create("all.log")
+	if err != nil {
+		panic(err)
+	}
 
 	l.SetOutput(io.Discard)
 
 	l.AddHook(&writerHook{
 		Writer: []io.Writer{
-			// file,
+			file,
 			os.Stdout},
 		LogLevels: logrus.AllLevels,
 	})
