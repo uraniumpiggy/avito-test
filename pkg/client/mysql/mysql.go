@@ -12,7 +12,7 @@ import (
 
 func NewClient(ctx context.Context, host, port, username, password, database string) (*sql.DB, error) {
 	logger := logging.NewLogger()
-	dbURL := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s", username, password, host, port, database)
+	dbURL := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true", username, password, host, port, database)
 	db, err := sql.Open("mysql", dbURL)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to connect to database due to error %s", err)
@@ -26,8 +26,8 @@ func NewClient(ctx context.Context, host, port, username, password, database str
 	logger.Info("Successfully connected to database")
 
 	db.SetConnMaxLifetime(time.Minute * 3)
-	db.SetMaxOpenConns(15)
-	db.SetMaxIdleConns(10)
+	db.SetMaxOpenConns(100)
+	db.SetMaxIdleConns(20)
 
 	return db, nil
 }

@@ -13,13 +13,30 @@ type db struct {
 	logger *logging.Logger
 }
 
-func (d *db) execWithTx(ctx context.Context, fn func() error) error {
-	tx, err := d.BeginTx(ctx, &sql.TxOptions{})
+func isUserExsists(d *db, id uint32) error {
+	row := d.QueryRow(`select count(id) from service_user where id = ?;`, id)
+	return row.Err()
+}
+
+func updateUserReport(tx *sql.Tx, user_id uint32, amount float32, description string) error {
+	r, err := tx.Exec(`insert into user_report (service_user_id, amount, description) values (?, ?, ?)`, user_id, amount, description)
+	if err != nil {
+		return err
+	}
+	affected, err := r.RowsAffected()
+	if affected == 0 || err != nil {
+		return fmt.Errorf("Error with rows affection")
+	}
+	return nil
+}
+
+func (d *db) execWithTx(ctx context.Context, fn func(tx *sql.Tx) error) error {
+	tx, err := d.BeginTx(ctx, &sql.TxOptions{Isolation: 0})
 	if err != nil {
 		return err
 	}
 
-	err = fn()
+	err = fn(tx)
 
 	if err != nil {
 		if rbErr := tx.Rollback(); rbErr != nil {
@@ -32,61 +49,34 @@ func (d *db) execWithTx(ctx context.Context, fn func() error) error {
 }
 
 func (d *db) TopUpMoney(ctx context.Context, data *cashaccount.UserAmount) error {
-	err := d.execWithTx(ctx, func() error {
-		stmt, err := d.Prepare(`select count(id) from service_user where id = ?;`)
-		stmt2, err2 := d.Prepare(`select count(m.id) as count from service_user as u, main_account as m where m.service_user_id = ?;`)
-		stmt3, err3 := d.Prepare(`insert into main_account (balance, service_user_id) values (?, ?);`)
-		stmt4, err4 := d.Prepare(`update main_account set balance = balance + ? where service_user_id = ?;`)
+	err := isUserExsists(d, data.ID)
+	if err != nil {
+		return err
+	}
 
-		if err != nil || err2 != nil || err3 != nil || err4 != nil {
-			return fmt.Errorf("Errors in prepared statements %s, %s, %s, %s", err, err2, err3, err4)
-		}
+	var count int
+	row := d.QueryRow(`select count(id) from main_account where service_user_id = ?;`, data.ID)
+	if err = row.Scan(&count); err != nil {
+		return err
+	}
 
-		defer stmt.Close()
-		defer stmt2.Close()
-		defer stmt3.Close()
-		defer stmt4.Close()
-
-		rows, err := stmt.Query(data.ID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		var count int
-		for rows.Next() {
-			err = rows.Scan(&count)
-			if err != nil {
-				return err
-			}
-		}
-		if count == 0 {
-			return fmt.Errorf("User not found")
-		}
-
-		rows2, err := stmt2.Query(data.ID)
-		if err != nil {
-			return err
-		}
-		defer rows2.Close()
-
-		for rows2.Next() {
-			err = rows2.Scan(&count)
-			if err != nil {
-				return err
-			}
-		}
+	err = d.execWithTx(ctx, func(tx *sql.Tx) error {
 
 		if count == 0 { // user not have main_account lets create it
-			_, err := stmt3.Exec(data.Amount, data.ID)
+			_, err := tx.Exec(`insert into main_account (balance, service_user_id) values (?, ?);`, data.Amount, data.ID)
 			if err != nil {
 				return err
 			}
 		} else { // user have main_account we ned top up it
-			_, err := stmt4.Exec(data.Amount, data.ID)
+			_, err := tx.Exec(`update main_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ID)
 			if err != nil {
 				return err
 			}
+		}
+
+		err = updateUserReport(tx, data.ID, float32(data.Amount), fmt.Sprintf("Account replenished"))
+		if err != nil {
+			return err
 		}
 
 		return nil
@@ -95,62 +85,36 @@ func (d *db) TopUpMoney(ctx context.Context, data *cashaccount.UserAmount) error
 }
 
 func (d *db) WithdrawMoney(ctx context.Context, data *cashaccount.UserAmount) error {
-	err := d.execWithTx(ctx, func() error {
-		stmt, err := d.Prepare(`select count(id) from service_user where id = ?;`)
-		stmt2, err2 := d.Prepare(`select balance from main_account where service_user_id = ?;`)
-		stmt4, err4 := d.Prepare(`update main_account set balance = balance - ? where service_user_id = ?;`)
+	err := isUserExsists(d, data.ID)
+	if err != nil {
+		return err
+	}
 
-		if err != nil || err2 != nil || err4 != nil {
-			return fmt.Errorf("Errors in prepared statements %s, %s, %s", err, err2, err4)
-		}
+	row := d.QueryRow(`select balance from main_account where service_user_id = ?;`, data.ID)
 
-		defer stmt.Close()
-		defer stmt2.Close()
-		defer stmt4.Close()
+	var balance float32 = -1
+	if err = row.Scan(&balance); err != nil {
+		return err
+	}
 
-		rows, err := stmt.Query(data.ID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
+	err = d.execWithTx(ctx, func(tx *sql.Tx) error {
+		if balance == -1 {
+			return fmt.Errorf("User not have main account")
+		} else {
 
-		var count int
-		for rows.Next() {
-			err = rows.Scan(&count)
-			if err != nil {
-				return err
-			}
-		}
-		if count == 0 {
-			return fmt.Errorf("User not found")
-		}
-
-		rows2, err := stmt2.Query(data.ID)
-		if err != nil {
-			return err
-		}
-		defer rows2.Close()
-
-		var balance int = -1
-		for rows2.Next() {
-			err = rows2.Scan(&balance)
-			if err != nil {
-				return err
-			}
-		}
-
-		if balance == -1 { // user not have main_account
-			// TODO
-		} else { // user have main_account withdraw it
-
-			if balance-int(data.Amount) < 0 {
+			if balance-data.Amount < 0 {
 				return fmt.Errorf("Withdraw amount is greater than balance")
 			}
 
-			_, err := stmt4.Exec(data.Amount, data.ID)
+			_, err := tx.Exec(`update main_account set balance = balance - ? where service_user_id = ?;`, data.Amount, data.ID)
 			if err != nil {
 				return err
 			}
+		}
+
+		err = updateUserReport(tx, data.ID, float32(data.Amount), fmt.Sprintf("Debiting money from an account"))
+		if err != nil {
+			return err
 		}
 
 		return nil
@@ -161,125 +125,139 @@ func (d *db) WithdrawMoney(ctx context.Context, data *cashaccount.UserAmount) er
 func (d *db) GetAmount(ctx context.Context, data *cashaccount.UserID) (*cashaccount.UserAmount, error) {
 	userAmount := &cashaccount.UserAmount{}
 
-	err := d.execWithTx(ctx, func() error {
-		stmt, err := d.Prepare(`select count(id) from service_user where id = ?;`)
-		stmt2, err2 := d.Prepare(`select balance from main_account where service_user_id = ?;`)
+	err := isUserExsists(d, data.ID)
+	if err != nil {
+		return nil, err
+	}
 
-		if err != nil || err2 != nil {
-			return fmt.Errorf("Errors in prepared statements %s, %s", err, err2)
-		}
+	row := d.QueryRow(`select balance from main_account where service_user_id = ?;`, data.ID)
+	if err != nil {
+		return nil, err
+	}
 
-		defer stmt.Close()
-		defer stmt2.Close()
+	var balance float32 = -1
+	if err = row.Scan(&balance); err != nil {
+		return nil, err
+	}
 
-		rows, err := stmt.Query(data.ID)
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-
-		var count int
-		for rows.Next() {
-			err = rows.Scan(&count)
-			if err != nil {
-				return err
-			}
-		}
-		if count == 0 {
-			return fmt.Errorf("User not found")
-		}
-
-		rows2, err := stmt2.Query(data.ID)
-		if err != nil {
-			return err
-		}
-		defer rows2.Close()
-
-		var balance int = -1
-		for rows2.Next() {
-			err = rows2.Scan(&balance)
-			if err != nil {
-				return err
-			}
-		}
-
-		if balance == -1 { // user not have main_account
-			return fmt.Errorf("User hane not main account")
-		} else { // user have main_account withdraw it
-			userAmount.Amount = uint32(balance)
-		}
-
-		return nil
-	})
+	if balance == -1 {
+		return nil, fmt.Errorf("User hane not main account")
+	} else {
+		userAmount.Amount = balance
+	}
 
 	return userAmount, err
 }
 
 func (d *db) TransferBetweenUsers(ctx context.Context, data *cashaccount.MoneyTransferDetails) error {
-	err := d.execWithTx(ctx, func() error {
-		stmt, err := d.Prepare(`select * from service_user where id in (?, ?);`)
-		stmt2, err2 := d.Prepare(`select service_user_id, balance from main_account where service_user_id in (?, ?);`)
-		stmt3, err3 := d.Prepare(`update main_account set balance = balance - ? where service_user_id = ?;`)
-		stmt4, err4 := d.Prepare(`update main_account set balance = balance + ? where service_user_id = ?;`)
+	rows, err := d.Query(`select * from service_user where id in (?, ?);`, data.FromId, data.ToId)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
 
-		if err != nil || err2 != nil || err3 != nil || err4 != nil {
-			return fmt.Errorf("Errors in prepared statements %s, %s, %s, %s", err, err2, err3, err4)
-		}
-
-		defer stmt.Close()
-		defer stmt2.Close()
-		defer stmt3.Close()
-		defer stmt4.Close()
-
-		rows, err := stmt.Query(data.FromId, data.ToId)
+	var count int
+	for rows.Next() {
+		count += 1
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+	}
+	if count != 2 {
+		return fmt.Errorf("One or both users not found")
+	}
 
-		var count int
-		for rows.Next() {
-			count += 1
-			if err != nil {
-				return err
-			}
+	rows2, err := d.Query(`select service_user_id, balance from main_account where service_user_id in (?, ?);`, data.FromId, data.ToId)
+	if err != nil {
+		return err
+	}
+	defer rows2.Close()
+
+	balances := make(map[uint32]float32)
+	count = 0
+	var id uint32
+	var balance float32
+	for rows2.Next() {
+		count += 1
+		err = rows2.Scan(&id, &balance)
+		if err != nil {
+			return err
 		}
+		balances[id] = balance
+	}
+	err = d.execWithTx(ctx, func(tx *sql.Tx) error {
 		if count != 2 {
-			return fmt.Errorf("One of users not found") // !!! fix it
-		}
-
-		rows2, err := stmt2.Query(data.FromId, data.ToId)
-		if err != nil {
-			return err
-		}
-		defer rows2.Close()
-
-		balances := make(map[uint32]uint32)
-		count = 0
-		var id, balance uint32
-		for rows2.Next() {
-			count += 1
-			err = rows2.Scan(&id, &balance)
-			if err != nil {
-				return err
-			}
-			balances[id] = balance
-		}
-
-		if count != 2 { // user not have main_account lets create it
 			return fmt.Errorf("One of user have not main account")
 		} else {
 			if balances[data.FromId] < data.Amount {
-				return fmt.Errorf("Not enough money")
+				return fmt.Errorf("User %d has insufficient funds", data.FromId)
 			}
-			_, err5 := stmt3.Exec(data.Amount, data.FromId)
+			_, err5 := tx.Exec(`update main_account set balance = balance - ? where service_user_id = ?;`, data.Amount, data.FromId)
 			if err5 != nil {
 				return err5
 			}
-			_, err5 = stmt4.Exec(data.Amount, data.ToId)
+			_, err5 = tx.Exec(`update main_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ToId)
 			if err5 != nil {
 				return err5
 			}
+			err = updateUserReport(tx, data.FromId, float32(data.Amount), fmt.Sprintf("Transferring money to a user %d", data.ToId))
+			if err != nil {
+				return err
+			}
+			err = updateUserReport(tx, data.ToId, float32(data.Amount), fmt.Sprintf("Receiving money from the user %d", data.FromId))
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return err
+}
+
+func (d *db) ReserveMoney(ctx context.Context, data *cashaccount.ReserveDetails) error {
+	err := isUserExsists(d, data.ID)
+	if err != nil {
+		return err
+	}
+	var balance float32
+	row := d.QueryRow(`select balance from main_account where service_user_id = ?;`, data.ID)
+	if err := row.Scan(&balance); err != nil {
+		return err
+	}
+	if balance < data.Amount {
+		return fmt.Errorf("User %d has insufficient funds", data.ID)
+	}
+	var count int
+	row2 := d.QueryRow(`select count(id) from reserve_account where service_user_id = ?;`, data.ID)
+	if err := row2.Scan(&count); err != nil {
+		return err
+	}
+	err = d.execWithTx(ctx, func(tx *sql.Tx) error {
+		_, err := tx.Exec(`update main_account set balance = balance - ? where service_user_id = ?;`, data.Amount, data.ID)
+		if err != nil {
+			return err
+		}
+
+		if count == 0 { // user not have reserve_account lets create it
+			_, err := tx.Exec(`insert into reserve_account (balance, service_user_id) values (?, ?);`, data.Amount, data.ID)
+			if err != nil {
+				return err
+			}
+		} else { // user have reserve_account we ned top up it
+			_, err := tx.Exec(`update reserve_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ID)
+			if err != nil {
+				return err
+			}
+		}
+
+		_, err = tx.Exec(`insert into reservation (service_id, order_id, service_user_id, amount) values (?, ?, ?, ?);`, data.ServiceId, data.OrderId, data.ID, data.Amount)
+		if err != nil {
+			return err
+		}
+
+		err = updateUserReport(tx, data.ID, float32(data.Amount), fmt.Sprintf("The money %f was reserved for the order %d and the service %d", data.Amount, data.OrderId, data.ServiceId))
+		if err != nil {
+			return err
 		}
 
 		return nil
@@ -287,12 +265,137 @@ func (d *db) TransferBetweenUsers(ctx context.Context, data *cashaccount.MoneyTr
 	return err
 }
 
-func (d *db) ReserveMoney(ctx context.Context, data *cashaccount.ReserveDetails) error {
+func (d *db) AcceptRevenue(ctx context.Context, data *cashaccount.ReserveDetails) error {
+	err := isUserExsists(d, data.ID)
+	if err != nil {
+		return err
+	}
+
+	var amount float32
+	reservationRow := d.QueryRow(`select amount from reservation where service_id = ? and order_id = ? and service_user_id = ? and amount = ?;`, data.ServiceId, data.OrderId, data.ID, data.Amount)
+	if err := reservationRow.Scan(&amount); err != nil {
+		return err
+	}
+
+	var balance float32
+	row2 := d.QueryRow(`select balance from reserve_account where service_user_id = ?;`, data.ID)
+	if err := row2.Scan(&balance); err != nil {
+		return err
+	}
+	if balance < data.Amount {
+		return fmt.Errorf("Incorrect amount (not enough funds)")
+	}
+
+	err = d.execWithTx(ctx, func(tx *sql.Tx) error {
+		_, err = tx.Exec(`update reserve_account set balance = balance - ? where service_user_id = ?;`, data.Amount, data.ID)
+		if err != nil {
+			return err
+		}
+
+		_, err = tx.Exec(`delete from reservation where service_id = ? and order_id = ? and service_user_id = ? and amount = ?`, data.ServiceId, data.OrderId, data.ID, data.Amount)
+		if err != nil {
+			return err
+		}
+
+		_, err := tx.Exec(`insert into bookkeeping (service_user_id, service_id, amount) values (?, ?, ?)`, data.ID, data.ServiceId, data.Amount)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return d.execWithTx(ctx, func(tx *sql.Tx) error {
+			_, err := tx.Exec(`update main_account set balance = balance + ? where service_user_id = ?;`, data.Amount, data.ID)
+			if err != nil {
+				return err
+			}
+
+			_, err = tx.Exec(`update reserve_account set balance = balance - ? where service_user_id = ?;`, data.Amount, data.ID)
+			if err != nil {
+				return err
+			}
+
+			_, err = tx.Exec(`delete from reservation where service_id = ? and order_id = ? and service_user_id = ? and amount = ?`, data.ServiceId, data.OrderId, data.ID, data.Amount)
+			if err != nil {
+				return err
+			}
+
+			err = updateUserReport(tx, data.ID, float32(data.Amount), fmt.Sprintf("The money %f was unreserved for the order %d and the service %d", data.Amount, data.OrderId, data.ServiceId))
+			if err != nil {
+				return err
+			}
+
+			return nil
+		})
+	}
+
+	return err
+}
+
+func (d *db) CreateReport(ctx context.Context, timeStart, timeEnd string) ([]*cashaccount.BookkeepingReportRow, error) {
+	res := make([]*cashaccount.BookkeepingReportRow, 0)
+	rows, err := d.Query(`select service_id, sum(amount) as sum from bookkeeping where created_at >= ? and created_at < ? group by service_id;`, timeStart, timeEnd)
+	defer rows.Close()
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		item := new(cashaccount.BookkeepingReportRow)
+		if err := rows.Scan(&item.ServiceId, &item.Amount); err != nil {
+			return nil, err
+		}
+		res = append(res, item)
+	}
+
+	return res, nil
+}
+
+func (d *db) GetUserReport(ctx context.Context, uid, rowOffest, pageSize uint32, sortBy, sortDirection string) ([]*cashaccount.UserReportRow, error) {
+	res := make([]*cashaccount.UserReportRow, 0)
+	var statement string
+	if rowOffest == 0 && pageSize == 0 {
+		pageSize = 1000
+	}
+	if sortBy == "" {
+		statement = `select amount, description, created_at from user_report where service_user_id = ? limit ?, ?;`
+	} else {
+		statement = fmt.Sprintf(`select amount, description, created_at from user_report where service_user_id = ? order by %s %s limit ?, ?;`, sortBy, sortDirection)
+	}
+	rows, err := d.Query(statement, uid, rowOffest, pageSize)
+	if err != nil {
+		return nil, err
+	}
+
+	for rows.Next() {
+		item := new(cashaccount.UserReportRow)
+		if err := rows.Scan(&item.Amount, &item.Description, &item.DateTime); err != nil {
+			return nil, err
+		}
+
+		res = append(res, item)
+	}
+
+	return res, nil
+}
+
+func (d *db) SaveReport(ctx context.Context, hash, path string) error {
+	_, err := d.Exec(`insert into bookkeeping_report (hash_string, path_to_file) values (?, ?);`)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 
-func (d *db) UnreserveMoney(ctx context.Context, data *cashaccount.ReserveDetails) error {
-	return nil
+func (d *db) GetReport(ctx context.Context, hash string) (string, error) {
+	var path string
+	r := d.QueryRow(`select path_to_file from bookkeeping_report where hash_string = ?`, hash)
+	if err := r.Scan(&path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func NewStorage(database *sql.DB, logger *logging.Logger) cashaccount.Storage {

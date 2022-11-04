@@ -32,17 +32,10 @@ func main() {
 		panic(err)
 	}
 
+	logger.Info("Creating storage")
 	storage := db.NewStorage(database, logger)
 
-	err = storage.TransferBetweenUsers(context.Background(), &cashaccount.MoneyTransferDetails{
-		FromId: 4,
-		ToId:   3,
-		Amount: 250,
-	})
-	if err != nil {
-		panic(err)
-	}
-
+	logger.Info("Creating service")
 	service := cashaccount.NewService(storage, logger)
 
 	logger.Info("Register handler")

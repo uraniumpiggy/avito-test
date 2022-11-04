@@ -8,6 +8,9 @@ type Storage interface {
 	GetAmount(context.Context, *UserID) (*UserAmount, error)
 	TransferBetweenUsers(context.Context, *MoneyTransferDetails) error
 	ReserveMoney(context.Context, *ReserveDetails) error
-	UnreserveMoney(context.Context, *ReserveDetails) error
-	// TODO report and user explanation
+	AcceptRevenue(ctx context.Context, data *ReserveDetails) error
+	GetUserReport(ctx context.Context, uid, rowOffest, pageSize uint32, sortBy, sortDirection string) ([]*UserReportRow, error)
+	CreateReport(ctx context.Context, timeStart, timeEnd string) ([]*BookkeepingReportRow, error)
+	SaveReport(ctx context.Context, hash, path string) error
+	GetReport(ctx context.Context, hash string) (string, error)
 }
