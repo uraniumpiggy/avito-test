@@ -1,0 +1,352 @@
+openapi: 3.0.0
+info:
+  title: Микросервис для работы с балансом пользователей
+  version: 1.0.0
+servers:
+  - url: http://localhost:8080/
+    description: Dev server
+    
+components:
+  responses:
+    500:
+      description: Internal error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                default: "Internal error"
+              code:
+                type: string
+                default: "BS-000000"
+    404:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                default: "not found"
+              code:
+                type: string
+                default: "BS-000001"
+    400:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message:
+                type: string
+                default: "bad request"
+              code:
+                type: string
+                default: "BS-000002"
+              
+  schemas:
+    userAmount:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 3
+          minimum: 0
+        amount:
+          type: number
+          example: 70.83
+          minimum: 0
+    reserveDetails:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 3
+          minimum: 0
+        service_id:
+          type: integer
+          example: 1
+        order_id:
+          type: integer
+          example: 8
+          minimum: 0
+        amount:
+          type: number
+          example: 70.83
+          minimum: 0
+    moneyTransferDetails:
+      type: object
+      properties:
+        to_id:
+          type: integer
+          example: 1
+          minimum: 0
+        from_id:
+          type: integer
+          example: 2
+          minimum: 0
+        amount:
+          type: number
+          example: 70.83
+          minimum: 0
+    userReport:
+      type: array
+      items:
+        type: object
+        properties:
+          amount:
+            type: number
+            example: 70.83
+            minimum: 0
+          description:
+            type: string
+            example: Account replenished
+          dateTime:
+            type: string
+            example: 2022:10:12 12:12:12
+    reportLink:
+      type: object
+      properties:
+        link:
+          type: string
+          example: "localhost:8080/api/report/3983djkdjd923daskljdlaj"
+          
+paths:
+  /api/users/accrual/:
+    post:
+      description: Пополнить баланс пользователя
+      responses:
+        200:
+          description: Баланс пользователя успешно пополнен
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/userAmount'
+      tags:
+        - Пользователи
+  /api/users/withdraw/:
+    post:
+      description: Списать деньги с баланса пользователя
+      responses:
+        200:
+          description: Деньги успешно списаны
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/userAmount'
+      tags:
+        - Пользователи
+  /api/users/reserve/:
+    post:
+      description: Зарезервировать деньги на оплату услуги
+      responses:
+        200:
+          description: Деньги успешно зарезервированы
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/reserveDetails'
+      tags:
+        - Пользователи
+  /api/users/accept/:
+    post:
+      description: Признание выручки - списывает денги с резервного счета
+      responses:
+        200:
+          description: Деньги успешно признаны и списаны с резервного счета
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/reserveDetails'
+      tags:
+        - Пользователи
+  /api/users/transaction/:
+    post:
+      description: Перевод средств от одного пользователя к другому
+      responses:
+        200:
+          description: Перевод от оного пользователя к другому был совершен успешно
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/moneyTransferDetails'
+      tags:
+        - Пользователи
+  /api/users/balance/{id}:
+    parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+    get:
+      description: Получить текущий баланс пользователя
+      responses:
+        200:
+          description: Текущий баланс пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/userAmount'
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      tags:
+        - Пользователи
+  /api/users/report/:
+    get:
+      description: Получить отчет о действиях со счетом пользователя
+      parameters:
+        - in: query
+          name: id
+          schema:
+            type: integer
+            example: 1
+          required: true
+          description: ИД пользователя
+        - in: query
+          name: pageNum
+          schema:
+            type: string
+            example: 2
+          required: false
+          description: Номер страницы
+        - in: query
+          name: pageSize
+          schema:
+            type: string
+            example: 20
+          required: false
+          description: Размер страницы
+        - in: query
+          name: sortBy
+          schema:
+            type: string
+            example: amount
+          required: false
+          description: Поле по которому производиться сортировка (dateTime, amount)
+        - in: query
+          name: sortDirection
+          schema:
+            type: string
+            example: asc
+          required: false
+          description: Направление сортировки по возростанию или убыванию (asc, desc)
+      responses:
+        200:
+          description: Отчет о действиях со счетом пользователя
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/userReport'
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      tags:
+        - Пользователи
+    
+  /api/report/create/:
+    post:
+      description: Создать файл с отчетом бухглатерии
+      parameters:
+      - in: query
+        name: startTime
+        schema:
+          type: string
+          example: "2022-03"
+        required: true
+        description: На какой год,месяц (гггг-мм) необходимо создать отчет
+        
+      responses:
+        201:
+          description: Отчет создан
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/reportLink'
+      tags:
+        - Бухгалтерия
+  /api/report/{id}:
+    get:
+      parameters:
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: string
+      description: Скачать файл с отчетом бухгалтерии
+      responses:
+        200:
+          description: Файл отправлен успешно
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        400:
+          $ref: '#/components/responses/400'
+        404:
+          $ref: '#/components/responses/404'
+        500:
+          $ref: '#/components/responses/500'
+      tags:
+        - Бухгалтерия
+    

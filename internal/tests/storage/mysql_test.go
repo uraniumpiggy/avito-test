@@ -1,4 +1,4 @@
-package db
+package storage
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 	cashaccount "user-balance-service/internal/cash_account"
+	"user-balance-service/internal/cash_account/db"
 	"user-balance-service/pkg/client/mysql"
 	"user-balance-service/pkg/logging"
 )
@@ -27,7 +28,7 @@ func prepareStorage() {
 		panic(err)
 	}
 
-	storage := NewStorage(database, logger)
+	storage := db.NewStorage(database, logger)
 
 	s = storage
 	d = database
@@ -36,10 +37,14 @@ func prepareStorage() {
 func TestMain(t *testing.M) {
 	prepareStorage()
 	t.Run()
+	os.RemoveAll("all.log")
 	os.Exit(0)
 }
 
 func TestTopUpMoney(t *testing.T) {
+	d.Exec(`delete from main_account;`)
+	d.Exec(`delete from reservation;`)
+	d.Exec(`delete from reserve_account;`)
 	data := &cashaccount.UserAmount{
 		ID:     999,
 		Amount: 100,
@@ -122,14 +127,14 @@ func TestGetBalance(t *testing.T) {
 		panic(err)
 	}
 
-	data := &cashaccount.UserID{ID: 100}
+	var data uint32 = 100
 	_, err = s.GetAmount(context.Background(), data)
 	if err == nil {
 		t.Error()
 	}
 
-	data.ID = 1
-	ua, err := s.GetAmount(context.Background(), data)
+	data = 1
+	ua, err := s.GetAmount(context.Background(), 1)
 	if err != nil {
 		t.Error(err)
 	}
@@ -137,7 +142,7 @@ func TestGetBalance(t *testing.T) {
 		t.Error(ua.Amount)
 	}
 
-	d.Exec(`delete from main_account where service_user_id = ?;`, data.ID)
+	d.Exec(`delete from main_account where service_user_id = ?;`, data)
 }
 
 func TestTransactionBetweenUsers(t *testing.T) {

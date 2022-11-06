@@ -91,7 +91,7 @@ func (d *db) TopUpMoney(ctx context.Context, data *cashaccount.UserAmount) error
 	if err != nil {
 		d.logger.Errorf("Error %s in topup to user: %d amount: %f", err, data.ID, data.Amount)
 	} else {
-		d.logger.Infof("Topup from user: %d amount: %f", err, data.ID, data.Amount)
+		d.logger.Infof("Topup from user: %d amount: %f", data.ID, data.Amount)
 	}
 	return err
 }
@@ -134,20 +134,21 @@ func (d *db) WithdrawMoney(ctx context.Context, data *cashaccount.UserAmount) er
 	if err != nil {
 		d.logger.Errorf("Error %s in withdraw from user: %d amount: %f", err, data.ID, data.Amount)
 	} else {
-		d.logger.Infof("Withdraw from user: %d amount: %f", err, data.ID, data.Amount)
+		d.logger.Infof("Withdraw from user: %d amount: %f", data.ID, data.Amount)
 	}
 	return err
 }
 
-func (d *db) GetAmount(ctx context.Context, data *cashaccount.UserID) (*cashaccount.UserAmount, error) {
+func (d *db) GetAmount(ctx context.Context, id uint32) (*cashaccount.UserAmount, error) {
 	userAmount := &cashaccount.UserAmount{}
+	userAmount.ID = id
 
-	err := isUserExsists(d, data.ID)
+	err := isUserExsists(d, id)
 	if err != nil {
 		return nil, err
 	}
 
-	row := d.QueryRow(`select balance from main_account where service_user_id = ?;`, data.ID)
+	row := d.QueryRow(`select balance from main_account where service_user_id = ?;`, id)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +288,7 @@ func (d *db) ReserveMoney(ctx context.Context, data *cashaccount.ReserveDetails)
 	if err != nil {
 		d.logger.Errorf("Error %s in reserve user: %d amount: %f", err, data.ID, data.Amount)
 	} else {
-		d.logger.Infof("Reserve user: %d amount: %f", err, data.ID, data.Amount)
+		d.logger.Infof("Reserve user: %d amount: %f", data.ID, data.Amount)
 	}
 	return err
 }
@@ -325,6 +326,11 @@ func (d *db) AcceptRevenue(ctx context.Context, data *cashaccount.ReserveDetails
 		}
 
 		_, err := tx.Exec(`insert into bookkeeping (service_user_id, service_id, amount) values (?, ?, ?)`, data.ID, data.ServiceId, data.Amount)
+		if err != nil {
+			return err
+		}
+
+		err = updateUserReport(tx, data.ID, float32(data.Amount), fmt.Sprintf("The money %f was accepted for the order %d and the service %d", data.Amount, data.OrderId, data.ServiceId))
 		if err != nil {
 			return err
 		}
@@ -424,7 +430,7 @@ func (d *db) SaveReport(ctx context.Context, hash, path string) error {
 	if err != nil {
 		d.logger.Errorf("Saving bookkeeping report failed %s. Hash: %s, path: %s", err, hash, path)
 	} else {
-		d.logger.Info("Saved bookkeeping report. Hash: %s, path: %s", hash, path)
+		d.logger.Infof("Saved bookkeeping report. Hash: %s, path: %s", hash, path)
 	}
 	return err
 }

@@ -35,7 +35,7 @@ func (h *handler) Register(router *httprouter.Router) {
 	router.HandlerFunc(http.MethodPost, "/api/users/reserve/", middleware.Middleware(h.Reserve))
 	router.HandlerFunc(http.MethodPost, "/api/users/accept/", middleware.Middleware(h.AcceptTransfer))
 	router.HandlerFunc(http.MethodPost, "/api/users/transaction/", middleware.Middleware(h.UsersTransfer))
-	router.HandlerFunc(http.MethodGet, "/api/users/balance/", middleware.Middleware(h.GetUserBalance))
+	router.HandlerFunc(http.MethodGet, "/api/users/balance/:id", middleware.Middleware(h.GetUserBalance))
 	router.HandlerFunc(http.MethodPost, "/api/report/create/", middleware.Middleware(h.CreateReport))
 	router.HandlerFunc(http.MethodGet, "/api/report/:hash", middleware.Middleware(h.GetReport))
 	router.HandlerFunc(http.MethodGet, "/api/users/report/", middleware.Middleware(h.GetUserReport))
@@ -72,13 +72,15 @@ func (h *handler) Withdraw(w http.ResponseWriter, r *http.Request) error {
 }
 
 func (h *handler) GetUserBalance(w http.ResponseWriter, r *http.Request) error {
-	var uid UserID
-	err := json.NewDecoder(r.Body).Decode(&uid)
+	params := httprouter.ParamsFromContext(r.Context())
+	userId := params.ByName("id")
+
+	numUserId, err := strconv.Atoi(userId)
 	if err != nil {
 		return apperror.ErrBadRequest
 	}
 
-	userAmount, err := h.service.GetAmount(context.Background(), &uid)
+	userAmount, err := h.service.GetAmount(context.Background(), uint32(numUserId))
 	h.logger.Info(userAmount)
 	if err != nil {
 		return err
@@ -171,6 +173,10 @@ func (h *handler) GetUserReport(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 
+	if pageNum < 1 && urlPageNum != "" || pageSize < 1 && urlPageSize != "" {
+		return apperror.ErrBadRequest
+	}
+
 	urr, err := h.service.GetUserReport(context.Background(), uint32(uid), uint32(pageNum), uint32(pageSize), sortBy, sortDirection)
 	if err != nil {
 		return err
@@ -195,6 +201,8 @@ func (h *handler) CreateReport(w http.ResponseWriter, r *http.Request) error {
 	resp := &ReportLinkResponse{
 		Link: fmt.Sprintf("%s:%s/api/report/%s", cfg.Listen.BindIp, cfg.Listen.Port, hash),
 	}
+
+	w.WriteHeader(201)
 	json.NewEncoder(w).Encode(resp)
 	return nil
 }

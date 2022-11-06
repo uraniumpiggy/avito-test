@@ -9,6 +9,7 @@ import (
 
 type errMessage struct {
 	Message string `json:"messagee"`
+	Code    string `json:"code"`
 }
 
 type appHandler func(w http.ResponseWriter, r *http.Request) error
@@ -32,7 +33,10 @@ func Middleware(h appHandler) http.HandlerFunc {
 			}
 
 			w.WriteHeader(500)
-			json.NewEncoder(w).Encode(errMessage{Message: "Internal error"})
+			json.NewEncoder(w).Encode(errMessage{
+				Message: "Internal error",
+				Code:    "BS-000000",
+			})
 		}
 	}
 }

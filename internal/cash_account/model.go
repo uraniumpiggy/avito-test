@@ -7,10 +7,6 @@ type UserAmount struct {
 	Amount float32 `json:"amount"`
 }
 
-type UserID struct {
-	ID uint32 `json:"id"`
-}
-
 type MoneyTransferDetails struct {
 	FromId uint32  `json:"from_id"`
 	ToId   uint32  `json:"to_id"`

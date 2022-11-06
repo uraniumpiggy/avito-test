@@ -1,10 +1,21 @@
 version: '3'
 
 services:
-  database:
-    image: mysql
+  service:
+    build: .
     ports:
-      - 3306:3306
+      - 8080:8080 
+    restart: always
+    depends_on:
+      - database
+    # networks:
+    #   - fullstack
+
+  database:
+    container_name: database
+    image: mysql
+    # ports:
+    #   - 3306:3306
     environment:
       MYSQL_ROOT_PASSWORD: secret
       MYSQL_USER: user
@@ -13,3 +24,9 @@ services:
     restart: always
     volumes:
       - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+#     networks:
+#       - fullstack
+
+# networks:
+#   fullstack:
+#     driver: bridge

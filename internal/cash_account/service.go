@@ -19,8 +19,8 @@ type Service struct {
 	logger  *logging.Logger
 }
 
-func (s *Service) GetAmount(ctx context.Context, data *UserID) (*UserAmount, error) {
-	return s.storage.GetAmount(ctx, data)
+func (s *Service) GetAmount(ctx context.Context, id uint32) (*UserAmount, error) {
+	return s.storage.GetAmount(ctx, id)
 }
 
 func (s *Service) TopUpMoney(ctx context.Context, data *UserAmount) error {
@@ -71,6 +71,9 @@ func (s *Service) GetUserReport(
 	ctx context.Context,
 	uid, pageNum, pageSize uint32,
 	sortBy, sortDirection string) ([]*UserReportRow, error) {
+	if pageNum != 0 {
+		pageNum -= 1
+	}
 	rowOffset := pageNum * pageSize
 	if sortBy != "dateTime" && sortBy != "amount" && sortBy != "" {
 		return nil, apperror.ErrBadRequest
